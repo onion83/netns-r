@@ -1,6 +1,38 @@
 # 更新日志
 
-## 2026-06-19
+## 2026-06-19 (commit f6ec679)
+
+### Bug 修复
+- **NAT 源地址**：`configure_nat` 的 MASQUERADE `-s` 从 `ipv4_gateway` 改为 `ipv4_address`（CIDR），修复 NAT 规则匹配不到实际流量
+- **veth-peer 网关 IP**：`configure_veth_device` 新增 `configure_veth_peer_gateway`，给主机端 veth-peer 配置网关 IP（veth 模式下 veth-peer 充当命名空间网关）
+- **IPv6 NAT**：`configure_nat` 新增 `ip6tables MASQUERADE` + `net.ipv6.conf.all.forwarding=1`，修复 IPv6 外网不通
+- **PID 复用**：supervisor 用 `Child::try_wait` 替代 `kill -0`，避免 PID 复用导致进程存活误判
+- **环境变量注入**：supervisor 用 `Command::env` 替代 `KEY=VALUE command` shell 拼接，消除注入风险
+- **日志路径硬编码**：`log_system::init` 接受 `log_path` 参数，使用配置文件的 `global.log.path`
+- **默认路由静默失败**：路由添加失败从 `warn` 改为 `error`，避免网关配置错误被忽略
+- **cleanup 错误聚合**：`cleanup_namespaces` 收集所有错误，有失败时返回聚合 `Err`
+
+### 改进
+- `manage_namespaces`/`configure_dns` 支持 `dry_run` 参数，dry-run 走单一代码路径避免漂移
+- supervisor 新增 `stop_all_services`，退出时正确 kill+wait 子进程
+- 日志路径 `shell_quote` 转义，防止特殊字符破坏 shell 命令
+- `get_cpu_cores` 返回 `usize` 而非 `Result<usize>`（函数永不失败）
+- CLI `--log-level` 改为可选，未指定时使用配置文件级别
+
+### 配置修复
+- `example-netns.yaml`：ctc IPv4/IPv6 地址从 `.241` 改为 `.243`（避免与 cmc 重复）
+- `example-netns.yaml`：cuc/ctc 的 `service-list` 从 `network` 内部移到同级（修复 YAML 层级错误）
+- `test.yaml`：test-ns1/ns2 补充与网段匹配的 `ipv4-gateway`/`ipv6-gateway`
+
+### 文档
+- `docs/README.md`、`CODEBUDDY.md`：移除不存在的 `service.rs` 条目
+- 新增 `docs/ROADMAP.md`：性能提升和功能改进路线图
+
+### 验证
+- `cargo clippy` 零警告，7 个集成测试通过
+- arm64 runtime 镜像 IPv4/IPv6 双栈网络测试通过
+
+## 2026-06-19 (早期)
 
 ### 依赖升级
 - `clap`: 4.6
