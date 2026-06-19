@@ -10,6 +10,7 @@ mod config;
 mod env_check;
 mod log_system;
 mod netns;
+mod pidfile;
 mod supervisor;
 
 /// netns-r: Network namespace management tool
@@ -31,6 +32,14 @@ struct Args {
     /// Clean mode: delete all namespaces and related resources from config
     #[arg(long = "clean")]
     clean: bool,
+
+    /// PID file path (for OpenRC integration and crash recovery)
+    #[arg(long, default_value = pidfile::DEFAULT_PIDFILE)]
+    pidfile: String,
+
+    /// State file path (tracks created namespaces for crash recovery)
+    #[arg(long, default_value = pidfile::DEFAULT_STATE_FILE)]
+    statefile: String,
 }
 
 fn main() -> Result<()> {
@@ -60,17 +69,35 @@ fn main() -> Result<()> {
     config::validate_config(&config)?;
     info!("Configuration validated");
 
+    // 检查是否有上次异常退出的残留状态（SIGKILL 或崩溃后恢复）
+    if args.clean {
+        // clean 模式：强制清理所有命名空间 + pidfile/state
+        info!("Clean mode - deleting all namespaces and resources");
+        netns::cleanup_namespaces(&config)?;
+        pidfile::remove_pidfile(&args.pidfile);
+        pidfile::remove_state_file(&args.statefile);
+        return Ok(());
+    }
+
+    if pidfile::check_stale_pidfile(&args.pidfile, &args.statefile)? {
+        warn!("Detected stale state from previous abnormal exit, running recovery cleanup");
+        // 基本恢复：杀进程 + 删除命名空间
+        pidfile::recover_cleanup_basic(&args.pidfile, &args.statefile)?;
+        // 完整清理：veth-peer、iptables 规则、DNS 目录（需要 config 信息）
+        // 注意：cleanup_namespaces 内部会检查 ns 是否存在，已删的 ns 会跳过
+        let _ = netns::cleanup_namespaces(&config);
+        // 清理 pidfile/statefile（恢复完成）
+        pidfile::remove_pidfile(&args.pidfile);
+        pidfile::remove_state_file(&args.statefile);
+    }
+
     // 创建 stop flag 用于信号处理（在任何操作前创建）
     let stop_flag = Arc::new(AtomicBool::new(false));
 
     // 注册信号处理器（在任何操作前注册，确保能捕获 SIGTERM/SIGINT/SIGHUP）
     register_signal_handlers(stop_flag.clone())?;
 
-    // 执行主逻辑
-    if args.clean {
-        info!("Clean mode - deleting all namespaces and resources");
-        netns::cleanup_namespaces(&config)?;
-    } else if args.dry_run {
+    if args.dry_run {
         info!("Dry run mode - not executing commands");
         // 通过 executor 的 dry_run 模式显示网络配置命令（单一代码路径，避免与真实逻辑漂移）
         netns::manage_namespaces(&config, true)?;
@@ -84,6 +111,13 @@ fn main() -> Result<()> {
             warn!("Received stop signal before starting, exiting");
             return Ok(());
         }
+
+        // 写入 PID 文件（供 OpenRC 管理和崩溃恢复）
+        pidfile::write_pidfile(&args.pidfile)?;
+
+        // 记录即将创建的命名空间列表（用于崩溃恢复）
+        let ns_names: Vec<String> = config.netns_list.iter().map(|n| n.name.clone()).collect();
+        pidfile::write_state_file(&args.statefile, &ns_names)?;
 
         // 创建和管理网络命名空间
         netns::manage_namespaces(&config, false)?;
@@ -99,6 +133,10 @@ fn main() -> Result<()> {
             // oneshot 模式：启动服务但不监控
             supervisor::start_services_oneshot(&config)?;
         }
+
+        // 正常退出，清理 pidfile 和 statefile
+        pidfile::remove_pidfile(&args.pidfile);
+        pidfile::remove_state_file(&args.statefile);
     }
 
     info!("netns-r completed successfully");
@@ -106,30 +144,35 @@ fn main() -> Result<()> {
 }
 
 /// 注册信号处理器
-fn register_signal_handlers(stop_flag: Arc<AtomicBool>) -> Result<()> {
-    // 使用 ctrlc 处理 SIGINT 和 SIGTERM
-    let flag = stop_flag.clone();
-    ctrlc::set_handler(move || {
-        warn!("Received SIGINT/SIGTERM signal");
-        flag.store(true, Ordering::Relaxed);
-        supervisor::set_supervisor_stop_flag();
-    })?;
-
-    // 使用 nix 处理 SIGHUP（OpenRC reload 信号）
-    extern "C" fn handle_sighup(_sig: i32) {
-        warn!("Received SIGHUP signal");
-        supervisor::set_supervisor_stop_flag();
+/// 所有信号处理器只做 AtomicBool::store(true)，不做任何 IO/logging（async-signal-safe）
+fn register_signal_handlers(_stop_flag: Arc<AtomicBool>) -> Result<()> {
+    // SIGINT/SIGTERM → 设置 SUPERVISOR_STOP_FLAG
+    extern "C" fn handle_stop(_sig: i32) {
+        supervisor::SUPERVISOR_STOP_FLAG.store(true, Ordering::Relaxed);
     }
-    let sa = signal::SigAction::new(
+    let sa_stop = signal::SigAction::new(
+        signal::SigHandler::Handler(handle_stop),
+        signal::SaFlags::SA_RESTART,
+        signal::SigSet::empty(),
+    );
+    unsafe {
+        signal::sigaction(Signal::SIGINT, &sa_stop)?;
+        signal::sigaction(Signal::SIGTERM, &sa_stop)?;
+    }
+
+    // SIGHUP → 设置 RELOAD_FLAG（OpenRC reload 语义，不触发停止）
+    extern "C" fn handle_sighup(_sig: i32) {
+        supervisor::set_reload_flag();
+    }
+    let sa_hup = signal::SigAction::new(
         signal::SigHandler::Handler(handle_sighup),
         signal::SaFlags::SA_RESTART,
         signal::SigSet::empty(),
     );
     unsafe {
-        signal::sigaction(Signal::SIGHUP, &sa)?;
+        signal::sigaction(Signal::SIGHUP, &sa_hup)?;
     }
 
-    info!("Signal handler registered for SIGINT/SIGTERM/SIGHUP");
     Ok(())
 }
 

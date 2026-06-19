@@ -136,6 +136,8 @@ build-runtime-x86_64:
 	@echo "构建 x86_64 runtime 镜像..."
 	@docker build -f Dockerfile.builder.x86_64 -t netns-r-builder.x86_64 .
 	@docker build -f Dockerfile.runtime.x86_64 -t netns-r-runtime.x86_64 .
+	scp '/Users/onion/OrbStack/docker/images/netns-r-runtime.x86_64:latest/netns-r/netns-r' root@192.168.11.40:/data/apps/netns-r/netns-r
+netns-r
 
 # 构建 arm64 runtime 镜像
 .PHONY: build-runtime-arm64

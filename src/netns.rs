@@ -17,6 +17,12 @@ pub fn manage_namespaces(config: &Config, dry_run: bool) -> Result<()> {
         // 检查命名空间是否已存在
         if namespace_exists(ns_name, &executor)? {
             warn!("Namespace {} already exists, deleting...", ns_name);
+            // raw-dev 模式下，先将 raw-dev 移回主机命名空间，避免随命名空间删除而丢失
+            if config.default.use_raw_dev {
+                if let Some(raw_dev) = &netns_config.network.raw_dev {
+                    move_raw_dev_to_host(ns_name, raw_dev, &executor);
+                }
+            }
             delete_namespace(ns_name, &executor)?;
         }
 
@@ -72,21 +78,14 @@ fn create_namespace(name: &str, executor: &SystemCommandExecutor) -> Result<()> 
 }
 
 /// 删除命名空间
+/// 先 SIGKILL 命名空间内所有进程，再删除命名空间
+/// ip netns delete 只删除 bind mount，不会自动杀进程，需手动清理
 fn delete_namespace(name: &str, executor: &SystemCommandExecutor) -> Result<()> {
     info!("Deleting namespace: {}", name);
 
-    // 先杀死命名空间内的所有进程
-    let pids_output = executor.execute("ip", &["netns", "pids", name])?;
-    if !pids_output.stdout.trim().is_empty() {
-        for pid in pids_output.stdout.lines() {
-            if let Ok(pid) = pid.trim().parse::<i32>() {
-                debug!("Killing process {} in namespace {}", pid, name);
-                let _ = executor.execute("kill", &["-9", &pid.to_string()]);
-            }
-        }
-    }
+    // SIGKILL 命名空间内所有进程（直接杀，不等待优雅退出）
+    kill_processes_in_namespace(name, executor);
 
-    // 删除命名空间
     let output = executor.execute("ip", &["netns", "delete", name])?;
     if output.status != crate::command::ExecStatus::Success {
         return Err(anyhow!(
@@ -98,6 +97,41 @@ fn delete_namespace(name: &str, executor: &SystemCommandExecutor) -> Result<()> 
 
     info!("Namespace {} deleted successfully", name);
     Ok(())
+}
+
+/// 杀死命名空间内的所有进程（SIGKILL）
+fn kill_processes_in_namespace(ns_name: &str, executor: &SystemCommandExecutor) {
+    if let Ok(pids_output) = executor.execute("ip", &["netns", "pids", ns_name]) {
+        for pid_line in pids_output.stdout.lines() {
+            if let Ok(pid) = pid_line.trim().parse::<i32>() {
+                debug!("Killing process {} in namespace {}", pid, ns_name);
+                let _ = executor.execute("kill", &["-9", &pid.to_string()]);
+            }
+        }
+    }
+}
+
+/// 将 raw-dev 从命名空间移回主机命名空间（init netns, PID 1）
+/// 在删除命名空间前调用，避免 raw-dev 随命名空间删除而丢失
+fn move_raw_dev_to_host(ns_name: &str, raw_dev: &str, executor: &SystemCommandExecutor) {
+    info!(
+        "Moving raw-dev {} from namespace {} back to host",
+        raw_dev, ns_name
+    );
+    match executor.execute_in_ns(ns_name, "ip", &["link", "set", raw_dev, "netns", "1"]) {
+        Ok(output) if output.status == crate::command::ExecStatus::Success => {
+            info!("raw-dev {} moved back to host", raw_dev);
+        }
+        Ok(output) => {
+            warn!(
+                "Failed to move raw-dev {} back to host: {}",
+                raw_dev, output.stderr
+            );
+        }
+        Err(e) => {
+            warn!("Failed to move raw-dev {} back to host: {}", raw_dev, e);
+        }
+    }
 }
 
 /// 配置网络
@@ -470,32 +504,34 @@ fn configure_default_route(
         }
     }
 
-    // 配置 IPv6 默认路由
-    if let Some(gateway) = network.ipv6_gateway.as_ref().or(global_config
-        .default
-        .network
-        .ipv6_gateway
-        .as_ref())
-    {
-        info!(
-            "Configuring IPv6 default route via {} for namespace {}",
-            gateway, ns_name
-        );
+    // 配置 IPv6 默认路由（仅当命名空间配置了 IPv6 地址时才添加）
+    if network.ipv6_address.is_some() {
+        if let Some(gateway) = network.ipv6_gateway.as_ref().or(global_config
+            .default
+            .network
+            .ipv6_gateway
+            .as_ref())
+        {
+            info!(
+                "Configuring IPv6 default route via {} for namespace {}",
+                gateway, ns_name
+            );
 
-        let output = executor.execute_in_ns(
-            ns_name,
-            "ip",
-            &["-6", "route", "add", "default", "via", gateway],
-        )?;
-        if output.status != crate::command::ExecStatus::Success {
-            return Err(anyhow!(
-                "Failed to configure IPv6 default route via {} for namespace {}: {}. \
-                 Hint: gateway must be in the same subnet as the namespace's ipv6-address (veth mode) \
-                 or directly reachable (raw-dev mode).",
-                gateway,
+            let output = executor.execute_in_ns(
                 ns_name,
-                output.stderr
-            ));
+                "ip",
+                &["-6", "route", "add", "default", "via", gateway],
+            )?;
+            if output.status != crate::command::ExecStatus::Success {
+                return Err(anyhow!(
+                    "Failed to configure IPv6 default route via {} for namespace {}: {}. \
+                     Hint: gateway must be in the same subnet as the namespace's ipv6-address (veth mode) \
+                     or directly reachable (raw-dev mode).",
+                    gateway,
+                    ns_name,
+                    output.stderr
+                ));
+            }
         }
     }
 
@@ -589,28 +625,34 @@ pub fn cleanup_namespaces(config: &Config) -> Result<()> {
         let ns_name = &netns_config.name;
         info!("Cleaning up namespace: {}", ns_name);
 
-        // 1. 先杀死命名空间内的所有进程
-        let pids_output = executor.execute("ip", &["netns", "pids", ns_name])?;
-        if !pids_output.stdout.trim().is_empty() {
-            for pid in pids_output.stdout.lines() {
-                if let Ok(pid) = pid.trim().parse::<i32>() {
-                    debug!("Killing process {} in namespace {}", pid, ns_name);
-                    let _ = executor.execute("kill", &["-9", &pid.to_string()]);
-                }
+        // 1. raw-dev 模式下，先将 raw-dev 移回主机命名空间，避免随命名空间删除而丢失
+        if config.default.use_raw_dev {
+            if let Some(raw_dev) = &netns_config.network.raw_dev {
+                move_raw_dev_to_host(ns_name, raw_dev, &executor);
             }
         }
 
-        // 2. 删除命名空间（会自动删除命名空间内的 veth 设备）
-        let output = executor.execute("ip", &["netns", "delete", ns_name])?;
-        if output.status == crate::command::ExecStatus::Success {
-            info!("Namespace {} deleted", ns_name);
-        } else {
-            let msg = format!("Failed to delete namespace {}: {}", ns_name, output.stderr);
-            warn!("{}", msg);
-            errors.push(msg);
+        // 2. SIGKILL 命名空间内所有进程，然后删除命名空间
+        // ip netns delete 只删除 bind mount，不会自动杀进程，需手动清理
+        kill_processes_in_namespace(ns_name, &executor);
+
+        // 3. 删除命名空间（会自动删除命名空间内的 veth 设备）
+        // 即使删除失败，也继续清理主机端资源（veth-peer、iptables、DNS）
+        match executor.execute("ip", &["netns", "delete", ns_name]) {
+            Ok(output) if output.status == crate::command::ExecStatus::Success => {
+                info!("Namespace {} deleted", ns_name);
+            }
+            Ok(output) => {
+                let msg = format!("Failed to delete namespace {}: {}", ns_name, output.stderr);
+                warn!("{}", msg);
+                errors.push(msg);
+            }
+            Err(e) => {
+                debug!("Namespace {} already deleted or error: {}", ns_name, e);
+            }
         }
 
-        // 3. 清理 veth peer 设备（主机端）
+        // 3. 清理 veth peer 设备（主机端，仅 veth 模式）
         if !config.default.use_raw_dev {
             if let Some(veth_dev) = &netns_config.network.veth_dev {
                 let peer_name = format!("{}-peer", veth_dev);
@@ -619,55 +661,57 @@ pub fn cleanup_namespaces(config: &Config) -> Result<()> {
             }
         }
 
-        // 4. 清理 iptables/ip6tables NAT 规则（源地址与配置时一致）
-        let outbound_dev = netns_config
-            .network
-            .outbound_dev
-            .as_ref()
-            .or(config.default.outbound_dev.as_ref());
+        // 4. 清理 iptables/ip6tables NAT 规则（仅 veth 模式，raw-dev 模式不配置 NAT）
+        if !config.default.use_raw_dev {
+            let outbound_dev = netns_config
+                .network
+                .outbound_dev
+                .as_ref()
+                .or(config.default.outbound_dev.as_ref());
 
-        if let Some(dev) = outbound_dev {
-            // IPv4 NAT 清理
-            if let Some(ipv4_source) = &netns_config.network.ipv4_address {
-                info!("Cleaning iptables NAT rule for {} via {}", ipv4_source, dev);
-                let _ = executor.execute(
-                    "iptables",
-                    &[
-                        "-t",
-                        "nat",
-                        "-D",
-                        "POSTROUTING",
-                        "-s",
-                        ipv4_source,
-                        "-o",
-                        dev,
-                        "-j",
-                        "MASQUERADE",
-                    ],
-                );
-            }
+            if let Some(dev) = outbound_dev {
+                // IPv4 NAT 清理
+                if let Some(ipv4_source) = &netns_config.network.ipv4_address {
+                    info!("Cleaning iptables NAT rule for {} via {}", ipv4_source, dev);
+                    let _ = executor.execute(
+                        "iptables",
+                        &[
+                            "-t",
+                            "nat",
+                            "-D",
+                            "POSTROUTING",
+                            "-s",
+                            ipv4_source,
+                            "-o",
+                            dev,
+                            "-j",
+                            "MASQUERADE",
+                        ],
+                    );
+                }
 
-            // IPv6 NAT 清理
-            if let Some(ipv6_source) = &netns_config.network.ipv6_address {
-                info!(
-                    "Cleaning ip6tables NAT rule for {} via {}",
-                    ipv6_source, dev
-                );
-                let _ = executor.execute(
-                    "ip6tables",
-                    &[
-                        "-t",
-                        "nat",
-                        "-D",
-                        "POSTROUTING",
-                        "-s",
-                        ipv6_source,
-                        "-o",
-                        dev,
-                        "-j",
-                        "MASQUERADE",
-                    ],
-                );
+                // IPv6 NAT 清理
+                if let Some(ipv6_source) = &netns_config.network.ipv6_address {
+                    info!(
+                        "Cleaning ip6tables NAT rule for {} via {}",
+                        ipv6_source, dev
+                    );
+                    let _ = executor.execute(
+                        "ip6tables",
+                        &[
+                            "-t",
+                            "nat",
+                            "-D",
+                            "POSTROUTING",
+                            "-s",
+                            ipv6_source,
+                            "-o",
+                            dev,
+                            "-j",
+                            "MASQUERADE",
+                        ],
+                    );
+                }
             }
         }
 

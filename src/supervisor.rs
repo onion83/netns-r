@@ -10,9 +10,12 @@ use std::time::{Duration, Instant};
 /// 全局 stop flag（用于信号处理）
 pub static SUPERVISOR_STOP_FLAG: AtomicBool = AtomicBool::new(false);
 
-/// 设置 supervisor stop flag
-pub fn set_supervisor_stop_flag() {
-    SUPERVISOR_STOP_FLAG.store(true, Ordering::Relaxed);
+/// 全局 reload flag（SIGHUP 触发，OpenRC reload 语义）
+pub static RELOAD_FLAG: AtomicBool = AtomicBool::new(false);
+
+/// 设置 reload flag
+pub fn set_reload_flag() {
+    RELOAD_FLAG.store(true, Ordering::Relaxed);
 }
 
 /// 服务状态
@@ -128,6 +131,11 @@ impl Supervisor {
         while !self.stop_flag.load(Ordering::Relaxed)
             && !SUPERVISOR_STOP_FLAG.load(Ordering::Relaxed)
         {
+            // 检测 reload 信号（SIGHUP），日志移到此处输出（信号处理器中不做 IO）
+            if RELOAD_FLAG.swap(false, Ordering::Relaxed) {
+                warn!("Received SIGHUP signal (reload not yet implemented, ignoring)");
+            }
+
             if elapsed >= check_interval {
                 self.check_services()?;
                 self.restart_failed_services()?;
@@ -139,10 +147,11 @@ impl Supervisor {
             elapsed += Duration::from_secs(1);
         }
 
-        info!("Supervisor received stop signal, shutting down...");
-
-        // 停止所有运行中的服务进程
-        self.stop_all_services();
+        // 检测到 stop 信号，日志延迟到此处输出
+        if SUPERVISOR_STOP_FLAG.load(Ordering::Relaxed) {
+            info!("Stop signal detected, exiting supervisor loop");
+        }
+        info!("Supervisor shutting down (services will be killed by ip netns delete)");
 
         Ok(())
     }
@@ -365,17 +374,6 @@ impl Supervisor {
         Ok(())
     }
 
-    /// 停止所有运行中的服务进程
-    fn stop_all_services(&mut self) {
-        for (service_id, state) in &mut self.tracker.states {
-            if let ServiceState::Running { child, .. } = state {
-                let pid = child.id();
-                info!("Stopping service {} (PID {})", service_id, pid);
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
-    }
 }
 
 /// 查找服务配置

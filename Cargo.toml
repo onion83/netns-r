@@ -20,11 +20,9 @@ chrono = "0.4"
 anyhow = "1.0"
 # 日志接口
 log = { version = "0.4", features = ["std"] }
-# Unix 系统调用
+# Unix 系统调用（process: process_group, signal: sigaction, user: uid/gid）
 nix = { version = "0.31", features = ["process", "signal", "user"] }
 libc = "0.2"
-# 信号处理
-ctrlc = "3.5"
 
 [profile.release]
 opt-level = 3
