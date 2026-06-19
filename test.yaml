@@ -1,0 +1,111 @@
+# 测试配置文件 - 用于功能测试
+# 包含三个网络命名空间，用于验证 netns-r 的核心功能
+
+# 全局配置
+global:
+  # 启用 supervisord 以测试进程守护功能
+  supervisord:
+    enable: yes
+    check-interval: 1
+  # 日志配置
+  log:
+    level: debug
+    path: "/tmp/netns-r-test.log"
+
+# 默认配置
+default:
+  # 使用 veth 设备模式（测试环境）
+  use-raw-dev: no
+
+  # 出口网卡，方便多出口多
+  outbound-dev: eth0
+
+  # 网络配置
+  network:
+    # 默认 IPv4 网关
+    ipv4-gateway: "10.0.0.1"
+    # 默认 IPv6 网关（可选）
+    ipv6-gateway: "fd00::1"
+
+    # 默认 DNS 服务器
+    dns-servers:
+    - 223.5.5.5
+    - 119.29.29.29
+    - 2400:3200::1
+
+  # 日志文件路径模板
+  log-file:
+    path: "/tmp/netns-test-$(netns)-$(service).log"
+
+  # 默认服务列表
+  service-list:
+  # 测试服务 1: 简单的 echo 命令
+  - name: echo-test
+    command: "echo 'Hello from $(netns) namespace, service $(service)'"
+    log-file:
+      path: "/tmp/netns-test-$(netns)-$(service).log"
+    env:
+    - name: whomi
+      value: father
+
+  # 测试服务 2: ping 测试（需要网络配置正确）
+  - name: ping-test
+    command: "ping -c 3 -W 1 192.168.11.1"
+
+  # 测试服务 3: 长期运行服务（用于 supervisord 测试）
+  - name: supervisor-test
+    command: "sleep infinity"
+    log-file:
+      path: "/tmp/netns-test-$(netns)-supervisor.log"
+
+# 网络命名空间列表
+netns-list:
+
+# 命名空间 1: test-ns1
+- name: test-ns1
+  network:
+    # veth 设备名称
+    veth-dev: "veth-test1"
+    ipv4-address: "10.0.1.2/24"
+    ipv6-address: "fd00:1::2/64"
+  env:
+  - name: a
+    value: 1
+  - name: b
+    value: 2
+# 命名空间 2: test-ns2
+- name: test-ns2
+  network:
+    veth-dev: "veth-test2"
+    ipv4-address: "10.0.2.2/24"
+    ipv6-address: "fd00:2::2/64"
+  env:
+  - name: NS2_VAR
+    value: "netns2_value"
+    # 命名空间 3: test-ns3
+- name: test-ns3
+  network:
+    veth-dev: "veth-test3"
+    ipv4-address: "10.0.3.2/24"
+    ipv4-gateway: "10.0.3.1"
+    # IPv6 地址（可选）
+    # ipv6-address: "fd00:3::2/64"
+    # ipv6-gateway: "fd00:3::1"
+    # DNS 服务器
+    dns-servers:
+    - 8.8.8.8
+
+  # 自定义服务列表（覆盖默认配置）
+  service-list:
+  # 打印环境变量测试
+  - name: echo-only
+    command: "env | sort"
+    log-file: no
+    env:
+    - name: COMMON_VAR
+      value: "overridden_by_service"
+  # 长期运行服务（用于 supervisord 测试）
+  - name: supervisor-test
+    command: "sleep infinity"
+    log-file:
+      path: "/tmp/netns-test-$(netns)-supervisor.log"

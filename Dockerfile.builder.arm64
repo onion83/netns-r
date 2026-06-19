@@ -1,0 +1,40 @@
+FROM alpine:latest
+
+# 安装基础系统工具和网络工具
+RUN apk update && apk add --no-cache \
+    bash \
+    curl \
+    wget \
+    git \
+    make \
+    gcc \
+    musl-dev \
+    openssl-dev \
+    pkgconf \
+    # 网络工具
+    iproute2 \
+    iptables \
+    iputils \
+    # 进程管理工具
+    procps \
+    # 其他实用工具
+    jq \
+    tree \
+    htop \
+    && rm -rf /var/cache/apk/*
+
+# 安装 Rust 工具链 (musl target for Alpine)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --default-host aarch64-unknown-linux-musl
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# 验证安装
+RUN rustc --version && cargo --version && ip link show lo && iptables --version
+
+# 设置工作目录
+WORKDIR /workspace
+
+# 暴露常用端口（如果需要）
+# EXPOSE 8080
+
+# 默认启动 bash
+CMD ["/bin/bash"]

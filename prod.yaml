@@ -1,0 +1,110 @@
+# 全局配置
+global:
+  # 是否开启supervisord进行进程守护
+  supervisord:
+    # 是否开启
+    enable: yes
+    # 检查间隔
+    check-interval: 60
+  # 日志配置
+  log:
+    # 日志级别
+    level: debug
+    # 日志路径
+    path: "/tmp/netns-server.log"
+
+# 默认配置
+default:
+  # 是否使用原始设备
+  # 如果使用原始设备，直通模式，直接使用原始设备（可以是物理网卡或者 lxc/docker中的 veth）, 不会创建nat，需要正确配置地址和网关
+  # 如果不使用原始设备, nat模式，则创建veth设备，会自动在主机/容器再次创建 veth-peer,不能和原始设备网卡在同一网段上
+  use-raw-dev: yes
+
+  # 出口网卡，方便多出口, 多路由
+  outbound-dev: eth0
+
+  # 网络配置
+  network:
+    # 默认ipv4网关
+    ipv4-gateway: "192.168.11.1"
+    # 默认ipv6网关
+    ipv6-gateway: "fd83:11::1"
+
+    # 默认 DNS 服务器
+    dns-servers:
+    - 223.5.5.5
+    - 119.29.29.29
+    - 2400:3200::1
+  # 日志文件
+  log-file:
+    path: "/tmp/netns-$(netns)-$(service).log"
+
+  # 服务列表
+  service-list:
+  # 服务名称
+  - name: dping-server
+    # 完整命令和参数
+    command: "/data/tools/swoole-cli /data/apps/dping/dping-server.php" # 日志文件路径 (可选)
+    # 日志文件路径,自动捕捉程序标准输出和标准错误输出
+    # 如果配置为  log-file: no
+    log-file:
+      path: "/tmp/netns-$(netns)-$(service).log"
+    # 环境变量 (service级别）
+    env:
+    - name: hello
+      value: world
+
+  - name: ping
+    # 完整命令和参数
+    command: "ping 192.168.11.1 -c 10"
+
+# netns 容器列表
+netns-list:
+
+- name: cmc
+  # 网络配置
+  network:
+    # 原始设备名称
+    raw-dev: eth-cmc
+    # veth设备名称 
+    #veth-dev: "veth-cmc"
+    # IPv4 地址
+    ipv4-address: 192.168.11.41/24
+    # IPv4 网关(如果不设置，则使用全局配置 默认使用全局配置)
+    ipv4-gateway: 192.168.11.1
+    # IPv6 地址
+    ipv6-address: fd83:11::41/64
+    # IPv6 网关(如果不设置，则使用全局配置 默认使用全局配置)  
+    ipv6-gateway: fd83:11::1
+    # 域名服务器(如果不设置，则 使用系统默认 /etc/resolv.conf)
+    # 如果设置 程序将会改写 /etc/netns/$ns/resolv.conf
+    dns-servers:
+    - 211.138.240.100
+    - 211.138.245.180
+    - 2409:805c:2000:3000::1000
+    - 2409:805c:2000:3001::1000
+  # 服务列表:  内容同 default.service-list
+  # 如果 key 不设置，则使用默认配置服务列表
+  # 如果 key 已设置，切换为当前配置的服务列表，如果当前配置的服务列表为空[]，则不启动任何服务
+
+- name: ctc
+  network:
+    raw-dev: eth-ctc
+    ipv4-address: 192.168.11.42/24
+    ipv6-address: fd83:11::42/64
+    dns-servers:
+    - 202.103.224.68
+    - 202.103.225.68
+    - 240e:9:0:100:202:103:224:68
+    - 240e:9:2000:100:202:103:225:68
+
+- name: cuc
+  network:
+    raw-dev: eth-cuc
+    ipv4-address: 192.168.11.43/24
+    ipv6-address: fd83:11::43/64
+    dns-servers:
+    - 221.7.128.68
+    - 221.7.136.68
+    - 2408:8001:4000:9000:221:7:128:68
+    - 2408:8001:4010:9000:221:7:136:68

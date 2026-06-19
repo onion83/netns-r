@@ -1,0 +1,83 @@
+# netns-r runtime 镜像 (ARM64 版本)
+# 使用多阶段构建：第一阶段编译并测试，第二阶段构建轻量级 runtime 镜像
+
+# 第一阶段：编译和测试
+FROM netns-r-builder.arm64:latest AS builder
+
+# 设置工作目录
+WORKDIR /workspace
+
+# 复制项目文件
+COPY . .
+
+# 编译 release 版本
+RUN cargo build --release
+
+# 运行单元测试（跳过需要 netns 权限的集成测试）
+RUN cargo test --lib
+
+# 验证二进制文件
+RUN ls -la target/release/netns-r && \
+    ./target/release/netns-r --version || true
+
+# 第二阶段：runtime 镜像
+FROM alpine:latest
+
+# 安装运行时依赖
+RUN apk update && apk add --no-cache \
+    # 基础工具
+    bash \
+    curl \
+    wget \
+    vim \
+    bind-tools \
+    mtr \
+    # 网络工具（必需）
+    iproute2 \
+    iptables \
+    iputils \
+    # 进程管理工具
+    procps \
+    # 其他实用工具
+    jq \
+    # 清理缓存
+    && rm -rf /var/cache/apk/*
+
+# 创建 netns-r 目录
+RUN mkdir -p /netns-r
+
+# 从 builder 阶段复制编译好的二进制文件
+COPY --from=builder /workspace/target/release/netns-r /netns-r/
+
+# 设置可执行权限
+RUN chmod +x /netns-r/netns-r
+
+# 创建符号链接到 PATH
+RUN ln -sf /netns-r/netns-r /usr/local/bin/netns-r
+
+# 验证安装
+RUN netns-r --version
+
+# 设置工作目录
+WORKDIR /netns-r
+
+# 暴露常用端口（如果需要）
+# EXPOSE 8080
+
+# 设置默认配置文件路径
+ENV NETNS_R_CONFIG=/etc/netns-r/netns.yaml
+
+# 创建默认配置目录
+RUN mkdir -p /etc/netns-r
+
+# 复制示例配置文件（如果存在）
+COPY example-netns.yaml /etc/netns-r/netns.yaml.example
+
+# 复制默认测试配置文件到 /netns-r
+COPY test.yaml /netns-r/netns-r.yaml
+
+# 设置入口点为 sh，让用户手动执行
+ENTRYPOINT ["/bin/sh"]
+
+# 默认显示提示信息并进入交互式 shell
+CMD ["-c", "echo 'netns-r runtime container ready. Use /netns-r/netns-r to run.' && exec /bin/sh"]

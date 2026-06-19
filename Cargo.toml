@@ -1,0 +1,32 @@
+[package]
+name = "netns-r"
+version = "0.1.0"
+edition = "2021"
+description = "Network namespace management tool for Linux"
+authors = ["netns-r developers"]
+license = "MIT"
+
+[dependencies]
+# 配置解析
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+# 命令行参数
+clap = { version = "4.6", features = ["derive"] }
+# 终端颜色输出
+colored = "3.1"
+# 时间处理
+chrono = "0.4"
+# 错误处理
+anyhow = "1.0"
+# 日志接口
+log = { version = "0.4", features = ["std"] }
+# Unix 系统调用
+nix = { version = "0.31", features = ["process", "signal", "user"] }
+libc = "0.2"
+# 信号处理
+ctrlc = "3.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
