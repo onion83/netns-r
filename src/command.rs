@@ -22,7 +22,7 @@ pub struct CommandOutput {
 pub trait CommandExecutor {
     /// 执行命令
     fn execute(&self, cmd: &str, args: &[&str]) -> Result<CommandOutput>;
-    
+
     /// 在命名空间内执行命令
     fn execute_in_ns(&self, ns: &str, cmd: &str, args: &[&str]) -> Result<CommandOutput>;
 }
@@ -36,17 +36,22 @@ impl SystemCommandExecutor {
     pub fn new(dry_run: bool) -> Self {
         Self { dry_run }
     }
-    
+
     /// 执行命令并记录日志
-    fn execute_command(&self, cmd: &str, args: &[&str], in_ns: Option<&str>) -> Result<CommandOutput> {
+    fn execute_command(
+        &self,
+        cmd: &str,
+        args: &[&str],
+        in_ns: Option<&str>,
+    ) -> Result<CommandOutput> {
         let full_cmd = if let Some(ns) = in_ns {
             format!("ip netns exec {} {} {}", ns, cmd, args.join(" "))
         } else {
             format!("{} {}", cmd, args.join(" "))
         };
-        
+
         debug!("Executing: {}", full_cmd);
-        
+
         if self.dry_run {
             info!("[DRY RUN] {}", full_cmd);
             return Ok(CommandOutput {
@@ -55,22 +60,20 @@ impl SystemCommandExecutor {
                 status: ExecStatus::Success,
             });
         }
-        
+
         let output = if let Some(ns) = in_ns {
             Command::new("ip")
                 .args(["netns", "exec", ns, cmd])
                 .args(args)
                 .output()?
         } else {
-            Command::new(cmd)
-                .args(args)
-                .output()?
+            Command::new(cmd).args(args).output()?
         };
-        
+
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         let exit_code = output.status.code().unwrap_or(-1);
-        
+
         let status = if output.status.success() {
             ExecStatus::Success
         } else if exit_code == -1 {
@@ -78,7 +81,7 @@ impl SystemCommandExecutor {
         } else {
             ExecStatus::Failed
         };
-        
+
         match status {
             ExecStatus::Success => {
                 debug!("Command succeeded: {}", full_cmd);
@@ -97,7 +100,7 @@ impl SystemCommandExecutor {
                 error!("Command status unknown: {}", full_cmd);
             }
         }
-        
+
         Ok(CommandOutput {
             stdout,
             stderr,
@@ -110,7 +113,7 @@ impl CommandExecutor for SystemCommandExecutor {
     fn execute(&self, cmd: &str, args: &[&str]) -> Result<CommandOutput> {
         self.execute_command(cmd, args, None)
     }
-    
+
     fn execute_in_ns(&self, ns: &str, cmd: &str, args: &[&str]) -> Result<CommandOutput> {
         self.execute_command(cmd, args, Some(ns))
     }

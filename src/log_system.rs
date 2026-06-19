@@ -20,20 +20,17 @@ impl LogSystem {
             "error" => LevelFilter::Error,
             _ => LevelFilter::Info,
         };
-        
+
         let file = if let Some(path) = file_path {
-            let file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)?;
+            let file = OpenOptions::new().create(true).append(true).open(path)?;
             Some(Mutex::new(file))
         } else {
             None
         };
-        
+
         Ok(Self { level, file })
     }
-    
+
     /// 格式化日志消息
     fn format_message(&self, record: &Record) -> String {
         let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
@@ -44,7 +41,7 @@ impl LogSystem {
             Level::Debug => "DEBUG".blue().bold(),
             Level::Trace => "TRACE".purple().bold(),
         };
-        
+
         format!("{} [{}] {}", timestamp, level, record.args())
     }
 }
@@ -53,22 +50,23 @@ impl Log for LogSystem {
     fn enabled(&self, metadata: &Metadata) -> bool {
         metadata.level() <= self.level
     }
-    
+
     fn log(&self, record: &Record) {
         if !self.enabled(record.metadata()) {
             return;
         }
-        
+
         let message = self.format_message(record);
-        
+
         // 输出到终端
         println!("{}", message);
-        
+
         // 输出到文件（如果配置了）
         if let Some(file) = &self.file {
             if let Ok(mut file) = file.lock() {
                 // 文件中不使用颜色代码
-                let plain_message = format!("{} [{}] {}", 
+                let plain_message = format!(
+                    "{} [{}] {}",
                     Local::now().format("%Y-%m-%d %H:%M:%S"),
                     record.level(),
                     record.args()
@@ -77,7 +75,7 @@ impl Log for LogSystem {
             }
         }
     }
-    
+
     fn flush(&self) {
         if let Some(file) = &self.file {
             if let Ok(mut file) = file.lock() {
@@ -88,9 +86,10 @@ impl Log for LogSystem {
 }
 
 /// 初始化日志系统
-pub fn init(level: &str) -> Result<()> {
-    let log_system = LogSystem::new(level, Some("/tmp/netns-r.log"))?;
-    
+/// log_path 来自配置文件 global.log.path
+pub fn init(level: &str, log_path: &str) -> Result<()> {
+    let log_system = LogSystem::new(level, Some(log_path))?;
+
     log::set_boxed_logger(Box::new(log_system))?;
     log::set_max_level(match level.to_lowercase().as_str() {
         "debug" => LevelFilter::Debug,
@@ -98,6 +97,6 @@ pub fn init(level: &str) -> Result<()> {
         "error" => LevelFilter::Error,
         _ => LevelFilter::Info,
     });
-    
+
     Ok(())
 }

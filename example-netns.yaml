@@ -100,19 +100,19 @@ netns-list:
     - 221.7.136.68
     - 2408:8001:4000:9000:221:7:128:68
     - 2408:8001:4010:9000:221:7:136:68
-    service-list: []
+  service-list: []
 
 - name: ctc
   network:
     raw-dev: "eth-ctc"
     veth-dev: "veth-ctc"
-    ipv4-address: "192.168.11.241/24"
+    ipv4-address: "192.168.11.243/24"
     ipv4-gateway: "192.168.11.1"
-    ipv6-address: "fd83:99::241/64"
+    ipv6-address: "fd83:99::243/64"
     ipv6-gateway: "fd83:99::1"
     dns-servers:
     - 202.103.224.68
     - 202.103.225.68
     - 240e:9:0:100:202:103:224:68
     - 240e:9:2000:100:202:103:225:68
-    service-list: []
+  service-list: []

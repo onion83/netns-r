@@ -67,7 +67,9 @@ netns-list:
     # veth 设备名称
     veth-dev: "veth-test1"
     ipv4-address: "10.0.1.2/24"
+    ipv4-gateway: "10.0.1.1"
     ipv6-address: "fd00:1::2/64"
+    ipv6-gateway: "fd00:1::1"
   env:
   - name: a
     value: 1
@@ -78,7 +80,9 @@ netns-list:
   network:
     veth-dev: "veth-test2"
     ipv4-address: "10.0.2.2/24"
+    ipv4-gateway: "10.0.2.1"
     ipv6-address: "fd00:2::2/64"
+    ipv6-gateway: "fd00:2::1"
   env:
   - name: NS2_VAR
     value: "netns2_value"

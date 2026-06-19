@@ -160,7 +160,6 @@ netns-r/
 │   ├── config.rs       # 配置解析模块
 │   ├── netns.rs        # 网络命名空间管理
 │   ├── command.rs      # 命令执行器
-│   ├── service.rs      # 服务管理
 │   ├── supervisor.rs   # 进程守护器
 │   ├── log_system.rs   # 日志系统
 │   └── env_check.rs    # 环境检查

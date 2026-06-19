@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// 全局配置
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -19,7 +19,10 @@ where
         serde_yaml::Value::String(s) => match s.to_lowercase().as_str() {
             "yes" | "true" | "1" => Ok(true),
             "no" | "false" | "0" => Ok(false),
-            _ => Err(serde::de::Error::custom(format!("invalid boolean string: {}", s))),
+            _ => Err(serde::de::Error::custom(format!(
+                "invalid boolean string: {}",
+                s
+            ))),
         },
         _ => Err(serde::de::Error::custom("invalid boolean value")),
     }
@@ -49,7 +52,11 @@ pub struct DefaultConfig {
     #[serde(rename = "outbound-dev")]
     pub outbound_dev: Option<String>,
     pub network: NetworkConfig,
-    #[serde(rename = "log-file", deserialize_with = "deserialize_optional_log_file", default)]
+    #[serde(
+        rename = "log-file",
+        deserialize_with = "deserialize_optional_log_file",
+        default
+    )]
     pub log_file: Option<LogFileConfig>,
     #[serde(rename = "service-list")]
     pub service_list: Vec<ServiceConfig>,
@@ -83,11 +90,13 @@ where
         serde_yaml::Value::Null => Ok(None),
         // log-file: no 或 log-file: "no"
         serde_yaml::Value::Bool(false) => Ok(None),
-        serde_yaml::Value::String(s) if s.to_lowercase() == "no" || s.to_lowercase() == "false" => Ok(None),
+        serde_yaml::Value::String(s) if s.to_lowercase() == "no" || s.to_lowercase() == "false" => {
+            Ok(None)
+        }
         // log-file: {path: "..."}
         serde_yaml::Value::Mapping(_) => {
-            let config: LogFileConfig = serde_yaml::from_value(value)
-                .map_err(serde::de::Error::custom)?;
+            let config: LogFileConfig =
+                serde_yaml::from_value(value).map_err(serde::de::Error::custom)?;
             Ok(Some(config))
         }
         _ => Err(serde::de::Error::custom("invalid log-file value")),
@@ -99,7 +108,11 @@ where
 pub struct ServiceConfig {
     pub name: String,
     pub command: String,
-    #[serde(rename = "log-file", deserialize_with = "deserialize_optional_log_file", default)]
+    #[serde(
+        rename = "log-file",
+        deserialize_with = "deserialize_optional_log_file",
+        default
+    )]
     pub log_file: Option<LogFileConfig>,
     pub env: Option<Vec<EnvVar>>,
 }
@@ -180,40 +193,50 @@ pub fn get_service_list<'a>(
 pub fn validate_config(config: &Config) -> Result<()> {
     // 检查全局配置
     if config.global.supervisord.check_interval == 0 {
-        return Err(anyhow::anyhow!("supervisord check-interval must be greater than 0"));
+        return Err(anyhow::anyhow!(
+            "supervisord check-interval must be greater than 0"
+        ));
     }
-    
+
     // 检查网络命名空间配置
     for netns_config in &config.netns_list {
         if netns_config.name.is_empty() {
             return Err(anyhow::anyhow!("netns name cannot be empty"));
         }
-        
+
         // 检查网络配置
         let network = &netns_config.network;
         if config.default.use_raw_dev {
             if network.raw_dev.is_none() {
-                return Err(anyhow::anyhow!("raw-dev must be specified when use-raw-dev is true"));
+                return Err(anyhow::anyhow!(
+                    "raw-dev must be specified when use-raw-dev is true"
+                ));
             }
         } else {
             if network.veth_dev.is_none() {
-                return Err(anyhow::anyhow!("veth-dev must be specified when use-raw-dev is false"));
+                return Err(anyhow::anyhow!(
+                    "veth-dev must be specified when use-raw-dev is false"
+                ));
             }
         }
-        
+
         // 检查 IP 地址格式
         if let Some(ipv4) = &network.ipv4_address {
             if !ipv4.contains('/') {
-                return Err(anyhow::anyhow!("IPv4 address must include subnet mask (e.g., 192.168.1.1/24)"));
+                return Err(anyhow::anyhow!(
+                    "IPv4 address must include subnet mask (e.g., 192.168.1.1/24)"
+                ));
             }
         }
-        
+
         if let Some(ipv6) = &network.ipv6_address {
             if !ipv6.contains('/') {
-                return Err(anyhow::anyhow!("IPv6 address must include subnet mask (e.g., fd83:99::241/64)"));
+                return Err(anyhow::anyhow!(
+                    "IPv6 address must include subnet mask (e.g., fd83:99::241/64)"
+                ));
             }
         }
     }
-    
+
     Ok(())
 }
