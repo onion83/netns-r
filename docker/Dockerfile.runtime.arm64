@@ -1,8 +1,8 @@
-# netns-r runtime 镜像 (x86_64 版本)
+# netns-r runtime 镜像 (ARM64 版本)
 # 使用多阶段构建：第一阶段编译并测试，第二阶段构建轻量级 runtime 镜像
 
 # 第一阶段：编译和测试
-FROM --platform=linux/x86_64 netns-r-builder.x86_64:latest AS builder
+FROM netns-r-builder.arm64:latest AS builder
 
 # 设置工作目录
 WORKDIR /workspace
@@ -11,17 +11,17 @@ WORKDIR /workspace
 COPY . .
 
 # 编译 release 版本
-RUN cargo build --release
+RUN cargo build --release --locked
 
 # 运行单元测试（跳过需要 netns 权限的集成测试）
-RUN cargo test --lib
+RUN cargo test --lib --locked
 
 # 验证二进制文件
 RUN ls -la target/release/netns-r && \
     ./target/release/netns-r --version || true
 
 # 第二阶段：runtime 镜像
-FROM --platform=linux/x86_64 alpine:latest
+FROM alpine:latest
 
 # 安装运行时依赖
 RUN apk update && apk add --no-cache \
@@ -64,17 +64,12 @@ WORKDIR /netns-r
 # 暴露常用端口（如果需要）
 # EXPOSE 8080
 
-# 设置默认配置文件路径
-ENV NETNS_R_CONFIG=/etc/netns-r/netns.yaml
-
 # 创建默认配置目录
 RUN mkdir -p /etc/netns-r
 
-# 复制示例配置文件（如果存在）
-COPY example-netns.yaml /etc/netns-r/netns.yaml.example
-
-# 复制默认测试配置文件到 /netns-r
-COPY test.yaml /netns-r/netns-r.yaml
+# 示例配置；运行时显式传入 --config
+COPY conf/config.example.simple.yaml /etc/netns-r/config.example.simple.yaml
+COPY conf/config.example.full.yaml /etc/netns-r/config.example.full.yaml
 
 # 设置入口点为 sh，让用户手动执行
 ENTRYPOINT ["/bin/sh"]

@@ -1,0 +1,29 @@
+# 隔离 Linux 测试环境示例；实际配置复制为 conf/config.yaml。
+# 未设置 outbound-dev，因此不创建 NAT，也不开启主机 IP 转发。
+global:
+  supervisord:
+    enable: true
+    check-interval: 5
+  log:
+    level: info
+    path: /tmp/netns-r.log
+
+default:
+  use-raw-dev: false
+  network: {}
+  service-list:
+    - name: idle
+      command: "sleep 86400"
+      log-file:
+        path: /tmp/netns-$(netns)-$(service).log
+      env:
+        - name: EXAMPLE_VALUE
+          value: demo
+
+netns-list:
+  - name: demo-ns
+    network:
+      veth-dev: veth-demo
+      ipv4-address: 10.203.0.2/24
+      ipv4-gateway: 10.203.0.1
+      dns-servers: []

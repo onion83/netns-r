@@ -8,7 +8,7 @@ use netns_r::env_check;
 #[test]
 fn test_config_loading() -> Result<()> {
     // 测试加载示例配置文件
-    let config_path = "example-netns.yaml";
+    let config_path = "conf/config.example.simple.yaml";
     if Path::new(config_path).exists() {
         let config = config::load_config(config_path)?;
 
@@ -66,7 +66,7 @@ fn test_config_loading() -> Result<()> {
 #[test]
 fn test_config_validation() -> Result<()> {
     // 测试配置验证功能
-    let config_path = "example-netns.yaml";
+    let config_path = "conf/config.example.simple.yaml";
     if Path::new(config_path).exists() {
         let config = config::load_config(config_path)?;
 
@@ -102,7 +102,7 @@ fn test_variable_replacement() {
 #[test]
 fn test_service_list_retrieval() -> Result<()> {
     // 测试获取服务列表功能
-    let config_path = "example-netns.yaml";
+    let config_path = "conf/config.example.simple.yaml";
     if Path::new(config_path).exists() {
         let config = config::load_config(config_path)?;
 

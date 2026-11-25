@@ -1,6 +1,10 @@
 # Rust
 /target/
-Cargo.lock
+
+# Local configuration and agent state
+/conf/config.yaml
+/.codebuddy/
+CODEBUDDY.md
 
 # IDE
 .vscode/
@@ -12,12 +16,8 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs and temporary files
 *.log
-
-# Docker
-.docker/
-
-# Temporary files
 *.tmp
 *.temp
+.docker/
